@@ -9,6 +9,13 @@ Script to convert a selected event from an Antelope database to Hypoinverse
 import pandas as pd
 
 def getData(eventid, dbid):
+    print('Fetching data for event ' + str(eventid))    
+    
+    #function merges key Antelope tables and extracts event information to 
+    #return eventdb, a labeled dataframe with event location and pick 
+    #information. Feed the dataframe into function write2Hypoinverse to write 
+    #data to a properly formatted text file.
+    
     eventdb = []
     
     #set paths to relevant tables
@@ -49,7 +56,27 @@ def getData(eventid, dbid):
         
     return eventdb
     
+def writeLength(oldstr, newstr):
+    #Function checks that any variable change is the correct length for 
+    #Hypoinverse format. Also converts variable to a string regardless of 
+    #input type
+    
+    accstr = oldstr #default return old string unless new string is right len
+    if len(oldstr) == len(newstr):
+        accstr=str(newstr)
+    else:
+        print('Cannot change string, check proposed string length')
+    return accstr
+
 def write2Hypoinverse(eventdb, ffname):
+    #Takes in a dataframe eventdb created by getData and writes that data in 
+    #the proper format to a text file ffname that is properly formatted for 
+    #Hypoinverse.
+
+    print('Writing event data to Hypoinverse file: '+ \
+    str(eventdb['evid'].iloc[0]))    
+    
+    #initialize all variables as appropriately lengthed white space
     wsp = ' ' #initialize all variables as appropriately lengthed white space    
     
     #Initialize summary header variables as right length of spaces
@@ -128,17 +155,82 @@ def write2Hypoinverse(eventdb, ffname):
     
     #write to event file
     with open(ffname, 'a') as the_file:
-        the_file.write(headln)
+        
+        if len(headln) != 165: #check that header line is the correct length 
+            print('error: header line is incorrect length, not writing event'+\
+            'to file')       
+            return
+        else:
+            the_file.write(headln)
     
-    #Initialize pick data lines
+    return    
     
     #loop through picks
     
+    
+    #initialize pick data lines
+    statcode = wsp*5 #left justified 5 letter station code
+    statnet = wsp*2 #seismic network code
+    comp1code = wsp*1 #station component code 1 letter
+    comp3code = wsp*3 #station component code 3 letter
+    prmk = wsp*2 #P remark
+    pfm = wsp*1 #P first motion
+    pweightcode = wsp*1 #P weight code
+    pyr = wsp*4 #P pick year
+    pmdhm = wsp*8 #P pick month, day, hour, minute
+    psec = wsp*5 #P pick second
+    presid = wsp*4 #P pick residual
+    normpwt = wsp*3 #normalized P weight
+    ssec = wsp*5 #S arrival second
+    srmk = wsp*2 #S remark
+    sweightcode = wsp*1 #s weight code
+    sresid = wsp*4 #s travel time residual
+    amp = wsp*7 #amplitude peak-to-peak
+    ampunitcd = wsp*2 #amp units code
+    normswt = wsp*3 #s weight used
+    pdelay = wsp*4 #P delay time
+    sdelay = wsp*4 #S delay time
+    epidist = wsp*4 #epicentral distance
+    emang = wsp*3 #emergence angle at source
+    ampmagwtcode = wsp*1 #amplitude magnitude weight code
+    durmagwtcode = wsp*1 #duration magnitude weight code
+    amppd = wsp*3 #period at which station amplitude measured
+    statrmk = wsp*1 #station remark
+    codadur = wsp*4 #coda duration in s
+    azi2stat = wsp*3 #azimuth to station in deg E of N
+    durmag = wsp*3 #station duration magnitude
+    ampmag = wsp*3 #amplitude magnitude
+    impP = wsp*4 #importance of P arrival
+    impS = wsp*4 #importance of S arrival
+    dscode = wsp*1 #data source code
+    durmagcode = wsp*1 #duration magnitude code
+    ampmagcode = wsp*1 #amplitude magnitude code
+    statloccode = wsp*2 #2 letter stat location code
+    amptype = wsp*2 #amplitude type
+    acomp3code = wsp*3 #alternate 3-letter component code
+    ampmagyn = wsp*1 #X if station amplitude mag not used in event mag
+    durmagyn = wsp*1 #X if station duration mag not used in event mag
+    
     #set necessary variables to input database values
+    durmagyn = 'Y'    
+    statcode = 'GOGA '
     
     #concat to single line
+    pline = statcode+statnet+wsp+comp1code+comp3code+wsp+prmk+pfm+\
+    pweightcode+pyr+pmdhm+psec+presid+normpwt+ssec+srmk+wsp+\
+    sweightcode+sresid+amp+ampunitcd+normswt+pdelay+sdelay+epidist+\
+    emang+ampmagwtcode+durmagwtcode+amppd+statrmk+codadur+azi2stat+\
+    durmag+ampmag+impP+impS+dscode+durmagcode+ampmagcode+statloccode+\
+    amptype+acomp3code+ampmagyn+durmagyn
     
     #write to event file
+    with open(ffname, 'a') as the_file:
+        
+        if len(pline) != 121: #check that pick line is the correct length 
+            print('error: pick line is incorrect length, not writing pick'+\
+            'to file')        
+        else:
+            the_file.write(pline)
     
     return
     
