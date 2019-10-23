@@ -2,14 +2,18 @@
 """
 Created on Thu Oct 10 11:26:49 2019
 
-Script to convert a selected event from an Antelope database to Hypoinverse
+Functions (above) and script that calls functions (below) to get data for a 
+selected event from an input Antelope database and write to a Hypoinverse-
+compatible file
 
 @author: Rachel
 """
 import pandas as pd
+import time
+import numpy as np
 
 def getData(eventid, dbid):
-    print('Fetching data for event ' + str(eventid))    
+    print('Fetching data for event ' + str(eventid)+'\n')    
     
     #function merges key Antelope tables and extracts event information to 
     #return eventdb, a labeled dataframe with event location and pick 
@@ -22,7 +26,8 @@ def getData(eventid, dbid):
     pathevtbl = dbid + '/' + dbid + '.event'
     pathortbl = dbid + '/' + dbid + '.origin'
     pathassoctbl = dbid + '/' + dbid + '.assoc'
-    patharrivtbl = dbid + '/' + dbid + '.arrival'    
+    patharrivtbl = dbid + '/' + dbid + '.arrival'
+    pathnetwktbl = dbid + '/' + dbid + '.snetsta'    
         
     #load antelope tables to dataframes and pull event related rows
     evtbl = pd.read_csv(pathevtbl,header=None,delim_whitespace=True,
@@ -45,6 +50,10 @@ def getData(eventid, dbid):
                                   'azimuth','delaz','slow','delslo','ema',
                                   'rect','amp','per','logat','clip','fm',
                                   'snr','qual','auth','commid','lddate'])
+    netwktbl = pd.read_csv(pathnetwktbl,header=None,delim_whitespace=True,
+                           names=['netwk','sta','staid','lddate'])
+                              
+    #TO DO - ADD STATION AND NETWORK MAGNITUDE TABLES
                            
     eventinfo = evtbl[evtbl.evid==eventid]  
     
@@ -53,7 +62,8 @@ def getData(eventid, dbid):
                        suffixes=['_ev','_or']) 
     eventdb = eventdb.merge(assoctbl, on='orid', how='left',suffixes=['','_assoc'])
     eventdb = eventdb.merge(arrivtbl, on='arid', how='left',suffixes=['','_arriv'])
-        
+    eventdb = eventdb.merge(netwktbl, on='sta', how='left',suffixes=['','_netsta']) 
+     
     return eventdb
     
 def writeLength(oldstr, newstr):
@@ -62,23 +72,46 @@ def writeLength(oldstr, newstr):
     #input type
     
     accstr = oldstr #default return old string unless new string is right len
-    if len(oldstr) == len(newstr):
+    if len(str(oldstr)) == len(str(newstr)):
         accstr=str(newstr)
     else:
         print('Cannot change string, check proposed string length')
     return accstr
+    
+def writeMdhm(etime):
+    #function converts epoch time in Antelope database to 8-char month day
+    #hour minute time format for hypoinverse    
+    mdhmstr = '';
+    mdhmstr += format(time.gmtime(etime).tm_mon,'02')
+    mdhmstr += format(time.gmtime(etime).tm_mday, '02')
+    mdhmstr += format(time.gmtime(etime).tm_hour, '02')
+    mdhmstr += format(time.gmtime(etime).tm_min, '02')
+    return mdhmstr
 
 def write2Hypoinverse(eventdb, ffname):
     #Takes in a dataframe eventdb created by getData and writes that data in 
     #the proper format to a text file ffname that is properly formatted for 
     #Hypoinverse.
 
+    #This format starts with an event header line. Many of the blank variables
+    #will be over-written by hypoinverse
+    #The following lines include pick information for the event
+    #Each event then has a terminator line with input information about the 
+    #event, such as the trial earthquake origin location and time
+
+    #check if dataframe is empty i.e. event id provided does not exist
+    if eventdb.empty == True:
+        print('DataFrame is empty. Check that event ' + str(eventid) + \
+        ' exists. Will not write to Hypoinverse file.\n')
+        return    
+    
     print('Writing event data to Hypoinverse file: '+ \
     str(eventdb['evid'].iloc[0]))    
     
     #initialize all variables as appropriately lengthed white space
     wsp = ' ' #initialize all variables as appropriately lengthed white space    
     
+    #PART 1: HEADER LINE
     #Initialize summary header variables as right length of spaces
     yr = wsp*4 #year (I4)
     mdhm = wsp*8 #month, day, hour, minute (4I2)
@@ -137,12 +170,42 @@ def write2Hypoinverse(eventdb, ffname):
     versnum = wsp*1 #QDDS version number (A1)
     oriversnum = wsp*1 #origin instance version num (A1)
     
-    #set necessary variables to input database values
-    yr = str(2010)
-    ew = 'E'
-    oriversnum = 'L'
-    evid = '0123456789'
-    emod = 'EAR'
+    #set variables from whitespace to input database values
+    #using function writeLength to protect correct length format of variables
+    yr = writeLength(yr,str(eventdb['jdate'].iloc[0])[:4])  
+    
+    mdhm = writeLength(mdhm,writeMdhm(eventdb['time'].iloc[0]))   
+    
+    ortime = writeLength(ortime,int(time.gmtime((eventdb['time'].\
+    iloc[0])).tm_sec*100+round(eventdb['time'].iloc[1]%1*100,0)))
+    
+    latdeg = writeLength(latdeg,\
+    "{:>2}".format(int(np.floor(abs(eventdb['lat'].iloc[0])))))
+    
+    if eventdb['lat'].iloc[0] < 0:
+        writeLength(ns,'S')
+        
+    latmin = writeLength(latmin,"{:>4}".format(\
+    int(np.round(abs(eventdb['lat'].iloc[0]%1)*60*100))))
+    
+    londeg = writeLength(londeg,\
+    "{:>3}".format(int(np.floor(abs(eventdb['lon'].iloc[0])))))   
+    
+    if eventdb['lon'].iloc[0] > 0:
+        ew = writeLength(ew,'E')
+
+    lonmin = writeLength(lonmin,"{:>4}".format(\
+    int(np.round(abs(eventdb['lon'].iloc[0])%1*60*100))))
+    
+    dep = writeLength(dep, "{:>5}".format(int(np.round(\
+    eventdb['depth'].iloc[0]*100))))
+    
+    #NOTE 0 PLACEHOLDER BECAUSE NCSN MAG NOT CALCULATED
+    mag = writeLength(mag,'  0')     
+    
+    numt = writeLength(numt, "{:>3}".format(eventdb['nass'].iloc[0]))    
+    
+    evid = writeLength(evid,"{:>10}".format(int(eventdb['evid'].iloc[0])))
     
     #concat variables to single line
     headln = yr+mdhm+ortime+latdeg+ns+latmin+londeg+ew+lonmin+dep+mag+numt+ \
@@ -158,62 +221,104 @@ def write2Hypoinverse(eventdb, ffname):
         
         if len(headln) != 165: #check that header line is the correct length 
             print('error: header line is incorrect length, not writing event'+\
-            'to file')       
+            'to file\n')       
             return
         else:
-            the_file.write(headln)
+            the_file.write(headln)    
     
-    return    
-    
+    #PART 2: PICK LINES
     #loop through picks
     
     
     #initialize pick data lines
-    statcode = wsp*5 #left justified 5 letter station code
-    statnet = wsp*2 #seismic network code
-    comp1code = wsp*1 #station component code 1 letter
-    comp3code = wsp*3 #station component code 3 letter
-    prmk = wsp*2 #P remark
-    pfm = wsp*1 #P first motion
-    pweightcode = wsp*1 #P weight code
-    pyr = wsp*4 #P pick year
-    pmdhm = wsp*8 #P pick month, day, hour, minute
-    psec = wsp*5 #P pick second
-    presid = wsp*4 #P pick residual
-    normpwt = wsp*3 #normalized P weight
-    ssec = wsp*5 #S arrival second
-    srmk = wsp*2 #S remark
-    sweightcode = wsp*1 #s weight code
-    sresid = wsp*4 #s travel time residual
-    amp = wsp*7 #amplitude peak-to-peak
-    ampunitcd = wsp*2 #amp units code
-    normswt = wsp*3 #s weight used
-    pdelay = wsp*4 #P delay time
-    sdelay = wsp*4 #S delay time
-    epidist = wsp*4 #epicentral distance
-    emang = wsp*3 #emergence angle at source
-    ampmagwtcode = wsp*1 #amplitude magnitude weight code
-    durmagwtcode = wsp*1 #duration magnitude weight code
-    amppd = wsp*3 #period at which station amplitude measured
-    statrmk = wsp*1 #station remark
-    codadur = wsp*4 #coda duration in s
-    azi2stat = wsp*3 #azimuth to station in deg E of N
-    durmag = wsp*3 #station duration magnitude
-    ampmag = wsp*3 #amplitude magnitude
-    impP = wsp*4 #importance of P arrival
-    impS = wsp*4 #importance of S arrival
-    dscode = wsp*1 #data source code
-    durmagcode = wsp*1 #duration magnitude code
-    ampmagcode = wsp*1 #amplitude magnitude code
-    statloccode = wsp*2 #2 letter stat location code
-    amptype = wsp*2 #amplitude type
-    acomp3code = wsp*3 #alternate 3-letter component code
-    ampmagyn = wsp*1 #X if station amplitude mag not used in event mag
-    durmagyn = wsp*1 #X if station duration mag not used in event mag
+    statcode = wsp*5 #left justified 5 letter station code (A5)
+    statnet = wsp*2 #seismic network code (A2)
+    comp1code = wsp*1 #station component code 1 letter (A1)
+    comp3code = wsp*3 #station component code 3 letter (A3)
+    prmk = wsp*2 #P remark (A2)
+    pfm = wsp*1 #P first motion (A1)
+    pweightcode = wsp*1 #P weight code (I1)
+    pyr = wsp*4 #P pick year (I4)
+    pmdhm = wsp*8 #P pick month, day, hour, minute (4I2)
+    psec = wsp*5 #P pick second (F5.2)
+    presid = wsp*4 #P pick residual (F4.2)
+    normpwt = wsp*3 #normalized P weight (F3.2)
+    ssec = wsp*5 #S arrival second (F5.2)
+    srmk = wsp*2 #S remark (A2)
+    sweightcode = wsp*1 #s weight code (I1)
+    sresid = wsp*4 #s travel time residual (F4.2)
+    amp = wsp*7 #amplitude peak-to-peak (F7.2)
+    ampunitcd = wsp*2 #amp units code (I2)
+    normswt = wsp*3 #s weight used (F3.2)
+    pdelay = wsp*4 #P delay time (F4.2)
+    sdelay = wsp*4 #S delay time (F4.2)
+    epidist = wsp*4 #epicentral distance (F4.1)
+    emang = wsp*3 #emergence angle at source (F3.0)
+    ampmagwtcode = wsp*1 #amplitude magnitude weight code (I1)
+    durmagwtcode = wsp*1 #duration magnitude weight code (I1)
+    amppd = wsp*3 #period at which station amplitude measured (F3.2)
+    statrmk = wsp*1 #station remark (A1)
+    codadur = wsp*4 #coda duration in s (F4.0)
+    azi2stat = wsp*3 #azimuth to station in deg E of N (F3.0)
+    durmag = wsp*3 #station duration magnitude (F3.2)
+    ampmag = wsp*3 #amplitude magnitude (F3.2)
+    impP = wsp*4 #importance of P arrival (F4.3)
+    impS = wsp*4 #importance of S arrival (F4.3)
+    dscode = wsp*1 #data source code (A1)
+    durmagcode = wsp*1 #duration magnitude code (A1)
+    ampmagcode = wsp*1 #amplitude magnitude code (A1)
+    statloccode = wsp*2 #2 letter stat location code (A2)
+    amptype = wsp*2 #amplitude type (I2)
+    acomp3code = wsp*3 #alternate 3-letter component code (A3)
+    ampmagyn = wsp*1 #X if station amplitude mag not used in event mag (A1)
+    durmagyn = wsp*1 #X if station duration mag not used in event mag (A1)
     
     #set necessary variables to input database values
-    durmagyn = 'Y'    
-    statcode = 'GOGA '
+    
+    statcode = writeLength(statcode,"{:<5}".format(eventdb['sta'].iloc[0]))
+    
+    statnet = writeLength(statnet,"{:<2}".format(eventdb['netwk'].iloc[0]))
+
+    if 'Z' in eventdb['chan'].iloc[0]:
+        comp1code = writeLength(comp1code,'V')
+    else:
+        comp1code = writeLength(comp1code,'H')
+        
+    comp3code = writeLength(comp3code,"{:<3}".format(eventdb['chan'].iloc[0]))
+    
+    if eventdb['iphase'].iloc[0] == 'P':
+        prmk = writeLength(prmk,'iP')
+    
+        if eventdb['fm'].iloc[0] == 'U':
+            pfm = writeLength(pfm,'U')
+        elif eventdb['fm'].iloc[0] == 'D':
+            pfm = writeLength(pfm,'D')
+
+        #P weight code - LATER MAKE A SMARTER WEIGHTING SCHEME
+        #MAYBE DOWNWEIGHT ARRIVALS FURTHER AWAY
+        pweightcode = writeLength(pweightcode,2)
+    
+        #year
+        pyr = writeLength(pyr,time.gmtime(eventdb['time_arriv'].iloc[0]).tm_year)    
+    
+        #mdhm
+        pmdhm = writeLength(pmdhm,writeMdhm(eventdb['time_arriv'].iloc[0])) 
+    
+        #second
+        psec = writeLength(psec,int(time.gmtime((eventdb['time_arriv'].\
+        iloc[0])).tm_sec*100+round(eventdb['time_arriv'].iloc[0]%1*100,0)))
+    elif eventdb['iphase'].iloc[0] == 'S':
+        srmk = writeLength(srmk,'ES')
+        
+        sweightcode = writeLength(sweightcode,2)
+        
+        
+    
+    #amplitude
+    #amplitude units
+    #duration magnitude weight (4)    
+    #coda duration in s (0)
+    #station duration mag (0)
     
     #concat to single line
     pline = statcode+statnet+wsp+comp1code+comp3code+wsp+prmk+pfm+\
@@ -221,32 +326,35 @@ def write2Hypoinverse(eventdb, ffname):
     sweightcode+sresid+amp+ampunitcd+normswt+pdelay+sdelay+epidist+\
     emang+ampmagwtcode+durmagwtcode+amppd+statrmk+codadur+azi2stat+\
     durmag+ampmag+impP+impS+dscode+durmagcode+ampmagcode+statloccode+\
-    amptype+acomp3code+ampmagyn+durmagyn
+    amptype+acomp3code+ampmagyn+durmagyn+'\n' 
     
     #write to event file
     with open(ffname, 'a') as the_file:
-        
         if len(pline) != 121: #check that pick line is the correct length 
             print('error: pick line is incorrect length, not writing pick'+\
             'to file')        
         else:
             the_file.write(pline)
+            
+            
+    #PART 3: TERMINATOR LINE
     
     return
     
+#######################MODIFY BELOW HERE#######################
     
-    
-#Database name - put tables in folder that matches the directory name
+#Database name - put tables in folder in working directory that matches dbname
+#Or change paths to files in function getData
 dbname = 'GADBPart1'
 
+#Example for fetching 1 event's data from tables and writing output to file
 #Database event id - integer corresponding to event to prep for hypoinverse 
 eventid = 69
-
 #Arc file name for writing hypoinverse-compatible output
 arcfname = str(eventid) + '.arc'
-
 #Get data for this event id
 ev1dbm = getData(eventid,dbname)
-
 #Write data in hypoinverse format in file ffname
 write2Hypoinverse(ev1dbm,arcfname)
+
+#Example for multiple event's data from tables and writing output to file
