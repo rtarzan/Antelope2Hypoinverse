@@ -382,27 +382,112 @@ def write2Hypoinverse(eventdb, ffname):
         if len(termline) != 73: #check that pick line is the correct length 
             print('error: terminator line is incorrect length, not writing '+\
             'to file') 
-            print(len(termline))
-            print(termline)
         else:
             the_file.write(termline)
     
     return
     
+def writeSta2Hypoinverse(dbid, ffname, append_stations=False):
+    #function uses Antelope tables to write a hypoinverse station file
+    #dbid is the name of the directory within working directory that holds
+    #the antelope tables, where the database is also called dbid
+    #ffname is the name of the station file to write to
+    #append stations is a T/F variable to indicate whether to append to file
+    #ffname (True) or to over-write ffname (False)
+
+    stadb = [] #initialize master station dataframe
+
+    #Paths to antelope tables with station data
+    pathnetwktbl = dbid + '/' + dbid + '.snetsta'
+    pathstatbl = dbid + '/' + dbid + '.station'
+    pathinsttbl = dbid + '/' + dbid + '.instrument'
+    pathsensortbl = dbid + '/' + dbid + '.sensor'
+    pathsitetbl = dbid + '/' + dbid + '.site'
+    pathsitechantbl = dbid + '/' + dbid + '.sitechan'
+    
+    #load and join tables into a single dataframe
+    sitetbl = pd.read_fwf(pathsitetbl,header=None,colspecs='infer',
+                          names=['sta','ondate','offdate','lat','lon',
+                                 'elev','staname','statype','refsta',
+                                 'dnorth','deast','lddate'])
+    sitechantbl = pd.read_csv(pathsitechantbl,header=None,delim_whitespace=True,
+                             names=['sta','chan','ondate','chanid','offdate',
+                                    'ctype','edepth','hang','vang','descrip',
+                                    'lddate'])
+                                    
+    stadb = pd.merge(sitetbl,sitechantbl,on='sta',how='left',
+                     suffixes=['','_chan'])                                
+
+    #loop through stations and write station into for file ffname
+    #initialize properly-lengthed variables for Hypoinverse station file
+    wsp = ' '    
+    statcode = wsp*5 #left justified 5 letter station code (A5, 1X)
+    statnet = wsp*2 #seismic network code (A2, 1X)
+    comp1code = wsp*1 #station component code 1 letter (A1)
+    comp3code = wsp*3 #station component code 3 letter (A3, 1X)
+    statweight = wsp*1 #station weight (A1)    
+    latdeg = wsp*2 #latitude in degrees (I2, 1X)    
+    latmin = wsp*7 #latitude in minutes (F7.4)
+    ns = wsp*1 #blank for N, S for south (A1)
+    longdeg = wsp*3 #longitude in degrees (I3,1X)
+    longmin = wsp*7 #longitude in minutes (F7.4)
+    ew = wsp*1 #blank for W, E for east (A1)
+    elev = wsp*4 #elevation in m (I4)
+    amppd = wsp*3 #period at which station amplitude measured (F3.1,2X)    
+    altcrust = wsp*1 #2 or A indicates using an alternate crustal model (A1)
+    stadelayrmk = wsp*1 #optional station delay remark (A1)
+    pdelay1 = wsp*5 #P delay (s) for set 1 (F5.2, 1X)
+    pdelay2= wsp*5 #P delay (s) for set 2 (F5.2, 1X)
+    ampmagadj = wsp*5 #amplitude magnitude correction (F5.2)
+    ampmagwt = wsp*1 #amplitude magnitude weight (A1)
+    durmagadj = wsp*5 #duration magnitude correction (F5.2)
+    durmagwt = wsp*1 #duration magnitude weight (A1)
+    itype = wsp*1 #instrument type code (I1)
+    icalib = wsp*6 #instrument calibration factor (F6.2)
+    sta2code = wsp*2 #2 letter station code (A2)
+    sta3altcode = wsp*3 #3 letter alternate component code (A3)
+    negdep = wsp*1 #make depth negative regardless of sign (A1)
+    
+    #set station line variables using data from tables
+        
+    
+    staline = statcode+wsp+statnet+wsp+comp1code+comp3code+wsp+statweight+\
+    latdeg+wsp+latmin+ns+longdeg+wsp+longmin+ew+elev+amppd+wsp*2+altcrust+\
+    stadelayrmk+pdelay1+wsp+pdelay2+wsp+ampmagadj+ampmagwt+durmagadj+\
+    durmagwt+itype+icalib+sta2code+sta3altcode+negdep+'\n'
+
+    #write line to event file 
+    if append_stations==False:
+        openvar = 'w'
+    else:
+        openvar = 'a'
+        
+    with open(ffname, openvar) as the_file:
+        if len(staline) != 87: #check that pick line is the correct length 
+            print(len(staline))
+            print('error: terminator line is incorrect length, not writing '+\
+            'to file') 
+        else:
+            the_file.write(staline)   
+    
+    return stadb
 #######################MODIFY BELOW HERE#######################
     
 #Database name - put tables in folder in working directory that matches dbname
 #Or change paths to files in function getData
 dbname = 'GADBPart1'
 
+#Example for writing station master file
+stadb = writeSta2Hypoinverse(dbname,dbname+'.sta',append_stations=False)
+
 #Example for fetching 1 event's data from tables and writing output to file
 #Database event id - integer corresponding to event to prep for hypoinverse 
-eventid = 69
+#eventid = 69
 #Arc file name for writing hypoinverse-compatible output
-arcfname = str(eventid) + '.arc'
+#arcfname = str(eventid) + '.arc'
 #Get data for this event id
-ev1dbm = getData(eventid,dbname)
+#ev1dbm = getData(eventid,dbname)
 #Write data in hypoinverse format in file ffname
-write2Hypoinverse(ev1dbm,arcfname)
+#write2Hypoinverse(ev1dbm,arcfname)
 
 #Example for multiple event's data from tables and writing output to file
