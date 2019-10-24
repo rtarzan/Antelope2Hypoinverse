@@ -6,6 +6,20 @@ Functions (above) and script that calls functions (below) to get data for a
 selected event from an input Antelope database and write to a Hypoinverse-
 compatible file
 
+Antelope tables are in a slightly modified version of CSS (Center for Seismic
+Studies) scehma
+
+Assumes Antelope database tables are stored in the following way for database
+named AntDB as an example:
+
+workingdirectory/AntDB - name of directory where tables are stored
+tables have names AntDB.origin, AntDB.arrival, etc.
+
+Check the output after running to see if data was not written to the
+output file because of length issues; this script will not write data to 
+the file if it's the wrong length, but it will run and output the data that
+could not be written to the command line
+
 @author: Rachel
 """
 import pandas as pd
@@ -60,9 +74,12 @@ def getData(eventid, dbid):
     #join data from other tables associated with event
     eventdb = pd.merge(eventinfo, ortbl, on='evid', how='left',
                        suffixes=['_ev','_or']) 
-    eventdb = eventdb.merge(assoctbl, on='orid', how='left',suffixes=['','_assoc'])
-    eventdb = eventdb.merge(arrivtbl, on='arid', how='left',suffixes=['','_arriv'])
-    eventdb = eventdb.merge(netwktbl, on='sta', how='left',suffixes=['','_netsta']) 
+    eventdb = eventdb.merge(assoctbl, 
+                            on='orid', how='left',suffixes=['','_assoc'])
+    eventdb = eventdb.merge(arrivtbl, 
+                            on='arid', how='left',suffixes=['','_arriv'])
+    eventdb = eventdb.merge(netwktbl, 
+                            on='sta', how='left',suffixes=['','_netsta']) 
      
     return eventdb
     
@@ -75,7 +92,7 @@ def writeLength(oldstr, newstr):
     if len(str(oldstr)) == len(str(newstr)):
         accstr=str(newstr)
     else:
-        print('Cannot change string, '+newstr+' check proposed string length')
+        print('Cannot change string, '+str(newstr)+' check proposed string length')
     return accstr
     
 def writeMdhm(etime):
@@ -101,7 +118,7 @@ def write2Hypoinverse(eventdb, ffname):
 
     #check if dataframe is empty i.e. event id provided does not exist
     if eventdb.empty == True:
-        print('DataFrame is empty. Check that event ' + str(eventid) + \
+        print('DataFrame is empty. Check that event ' + str(ffname) + \
         ' exists. Will not write to Hypoinverse file.\n')
         return    
     
@@ -176,14 +193,15 @@ def write2Hypoinverse(eventdb, ffname):
     
     mdhm = writeLength(mdhm,writeMdhm(eventdb['time'].iloc[0]))   
     
-    ortime = writeLength(ortime,int(time.gmtime((eventdb['time'].\
-    iloc[0])).tm_sec*100+round(eventdb['time'].iloc[1]%1*100,0)))
+    ortime = writeLength(ortime,"{:>4}".format(int(time.gmtime(\
+    (eventdb['time'].iloc[0])).tm_sec*100+round(eventdb['time']\
+    .iloc[0]%1*100,0))))
     
     latdeg = writeLength(latdeg,\
     "{:>2}".format(int(np.floor(abs(eventdb['lat'].iloc[0])))))
     
     if eventdb['lat'].iloc[0] < 0:
-        writeLength(ns,'S')
+        ns = writeLength(ns,'S')
         
     latmin = writeLength(latmin,"{:>4}".format(\
     int(np.round(abs(eventdb['lat'].iloc[0]%1)*60*100))))
@@ -238,8 +256,8 @@ def write2Hypoinverse(eventdb, ffname):
         prmk = wsp*2 #P remark (A2)
         pfm = wsp*1 #P first motion (A1)
         pweightcode = wsp*1 #P weight code (I1)
-        pyr = wsp*4 #P pick year (I4)
-        pmdhm = wsp*8 #P pick month, day, hour, minute (4I2)
+        pyr = wsp*4 #pick year (I4)
+        pmdhm = wsp*8 #pick month, day, hour, minute (4I2)
         psec = wsp*5 #P pick second (F5.2)
         presid = wsp*4 #P pick residual (F4.2)
         normpwt = wsp*3 #normalized P weight (F3.2)
@@ -286,6 +304,8 @@ def write2Hypoinverse(eventdb, ffname):
             
         comp3code = writeLength(comp3code,"{:<3}".format(erow['chan'][:3]))
         
+        pyr = writeLength(pyr,time.gmtime(erow['time_arriv']).tm_year)
+        pmdhm = writeLength(pmdhm,writeMdhm(erow['time_arriv'])) 
         #write P versus S arrival info in different variables    
         if erow['iphase'] == 'P':
             prmk = writeLength(prmk,'iP')
@@ -296,12 +316,8 @@ def write2Hypoinverse(eventdb, ffname):
             elif erow['fm'] == 'D':
                 pfm = writeLength(pfm,'D')
     
-            #LATER MAKE A SMARTER WEIGHTING SCHEME DOWNWEIGHT ARRIVALS FURTHER AWAY
+            #LATER MAKE BETTER WEIGHTING SCHEME DOWNWEIGHT ARRIVALS FAR AWAY
             pweightcode = writeLength(pweightcode,2)
-    
-            pyr = writeLength(pyr,time.gmtime(erow['time_arriv']).tm_year)    
-    
-            pmdhm = writeLength(pmdhm,writeMdhm(erow['time_arriv'])) 
     
             psec = writeLength(psec,"{:>5}".format(int(time.gmtime\
             ((erow['time_arriv'])).tm_sec*100+round(erow['time_arriv']\
@@ -338,7 +354,7 @@ def write2Hypoinverse(eventdb, ffname):
         #write to event file
         with open(ffname, 'a') as the_file:
             if len(pline) != 121: #check that pick line is the correct length 
-                print('error: pick line is incorrect length, not writing pick'+\
+                print('error:pick line is incorrect length, not writing pick'+\
                 'to file')        
             else:
                 the_file.write(pline)
@@ -396,80 +412,169 @@ def writeSta2Hypoinverse(dbid, ffname, append_stations=False):
     #ffname (True) or to over-write ffname (False)
 
     stadb = [] #initialize master station dataframe
-
+    newlines = [] #initialize variable to test for duplicate station lines    
+    
     #Paths to antelope tables with station data
     pathnetwktbl = dbid + '/' + dbid + '.snetsta'
-    pathstatbl = dbid + '/' + dbid + '.station'
     pathinsttbl = dbid + '/' + dbid + '.instrument'
     pathsensortbl = dbid + '/' + dbid + '.sensor'
     pathsitetbl = dbid + '/' + dbid + '.site'
     pathsitechantbl = dbid + '/' + dbid + '.sitechan'
+    pathinsttbl = dbid + '/' + dbid + '.instrument'
     
-    #load and join tables into a single dataframe
-    sitetbl = pd.read_fwf(pathsitetbl,header=None,colspecs='infer',
-                          names=['sta','ondate','offdate','lat','lon',
-                                 'elev','staname','statype','refsta',
-                                 'dnorth','deast','lddate'])
-    sitechantbl = pd.read_csv(pathsitechantbl,header=None,delim_whitespace=True,
-                             names=['sta','chan','ondate','chanid','offdate',
-                                    'ctype','edepth','hang','vang','descrip',
-                                    'lddate'])
-                                    
-    stadb = pd.merge(sitetbl,sitechantbl,on='sta',how='left',
-                     suffixes=['','_chan'])                                
-
-    #loop through stations and write station into for file ffname
-    #initialize properly-lengthed variables for Hypoinverse station file
-    wsp = ' '    
-    statcode = wsp*5 #left justified 5 letter station code (A5, 1X)
-    statnet = wsp*2 #seismic network code (A2, 1X)
-    comp1code = wsp*1 #station component code 1 letter (A1)
-    comp3code = wsp*3 #station component code 3 letter (A3, 1X)
-    statweight = wsp*1 #station weight (A1)    
-    latdeg = wsp*2 #latitude in degrees (I2, 1X)    
-    latmin = wsp*7 #latitude in minutes (F7.4)
-    ns = wsp*1 #blank for N, S for south (A1)
-    longdeg = wsp*3 #longitude in degrees (I3,1X)
-    longmin = wsp*7 #longitude in minutes (F7.4)
-    ew = wsp*1 #blank for W, E for east (A1)
-    elev = wsp*4 #elevation in m (I4)
-    amppd = wsp*3 #period at which station amplitude measured (F3.1,2X)    
-    altcrust = wsp*1 #2 or A indicates using an alternate crustal model (A1)
-    stadelayrmk = wsp*1 #optional station delay remark (A1)
-    pdelay1 = wsp*5 #P delay (s) for set 1 (F5.2, 1X)
-    pdelay2= wsp*5 #P delay (s) for set 2 (F5.2, 1X)
-    ampmagadj = wsp*5 #amplitude magnitude correction (F5.2)
-    ampmagwt = wsp*1 #amplitude magnitude weight (A1)
-    durmagadj = wsp*5 #duration magnitude correction (F5.2)
-    durmagwt = wsp*1 #duration magnitude weight (A1)
-    itype = wsp*1 #instrument type code (I1)
-    icalib = wsp*6 #instrument calibration factor (F6.2)
-    sta2code = wsp*2 #2 letter station code (A2)
-    sta3altcode = wsp*3 #3 letter alternate component code (A3)
-    negdep = wsp*1 #make depth negative regardless of sign (A1)
-    
-    #set station line variables using data from tables
-        
-    
-    staline = statcode+wsp+statnet+wsp+comp1code+comp3code+wsp+statweight+\
-    latdeg+wsp+latmin+ns+longdeg+wsp+longmin+ew+elev+amppd+wsp*2+altcrust+\
-    stadelayrmk+pdelay1+wsp+pdelay2+wsp+ampmagadj+ampmagwt+durmagadj+\
-    durmagwt+itype+icalib+sta2code+sta3altcode+negdep+'\n'
-
-    #write line to event file 
     if append_stations==False:
         openvar = 'w'
     else:
         openvar = 'a'
         
-    with open(ffname, openvar) as the_file:
-        if len(staline) != 87: #check that pick line is the correct length 
-            print(len(staline))
-            print('error: terminator line is incorrect length, not writing '+\
-            'to file') 
-        else:
-            the_file.write(staline)   
+    #load and join tables into a single dataframe
+    sitetbl = pd.read_fwf(pathsitetbl,header=None,colspecs='infer',
+                          names=['sta','ondate','offdate','lat','lon',
+                                 'elev','staname','statype','refsta',
+                                 'dnorth','deast','lddate'])
+    sitechantbl = pd.read_csv(pathsitechantbl,header=None,
+                              delim_whitespace=True,names=['sta','chan',
+                              'ondate','chanid','offdate','ctype','edepth',
+                              'hang','vang','descrip','lddate'])
+    sensortbl = pd.read_fwf(pathsensortbl,header=None,colspecs='infer',
+                            names=['sta','chan','time','endtime','inid',
+                                   'chanid','jdate','calratio','calper',
+                                   'tshift','instant','lddate'])
+    insttbl = pd.read_fwf(pathinsttbl,header=None,colspecs='infer',
+                          names=['inid','insname','instype','band','digital',
+                                 'samprate','ncalib','ncalper','dir','dfile',
+                                 'rsptype','lddate'])
+    nettbl = pd.read_fwf(pathnetwktbl,header=None,colspecs='infer',
+                         names=['net','sta','staid','lddate'])
+                                    
+    stadb = pd.merge(sitetbl,sitechantbl,on='sta',how='left',
+                     suffixes=['','_chan'])
+    #if sensor type changes during deployment then this may add rows
+    stadb = stadb.merge(sensortbl,on=['sta','chan'],
+                        how='left',suffixes=['','_sens'])
+    stadb = stadb.merge(insttbl,on='inid',how='left',suffixes=['','_inst'])                                
+    stadb = stadb.merge(nettbl,on='sta',how='left',suffixes=['','_netwk'])
     
+    #loop through stations and write station into for file ffname
+    for iind,erow in stadb.iterrows():
+        #initialize properly-lengthed variables for Hypoinverse station file
+        wsp = ' '    
+        statcode = wsp*5 #left justified 5 letter station code (A5, 1X)
+        statnet = wsp*2 #seismic network code (A2, 1X)
+        comp1code = wsp*1 #station component code 1 letter (A1)
+        comp3code = wsp*3 #station component code 3 letter (A3, 1X)
+        statweight = wsp*1 #station weight (A1)    
+        latdeg = wsp*2 #latitude in degrees (I2, 1X)    
+        latmin = wsp*7 #latitude in minutes (F7.4)
+        ns = wsp*1 #blank for N, S for south (A1)
+        longdeg = wsp*3 #longitude in degrees (I3,1X)
+        longmin = wsp*7 #longitude in minutes (F7.4)
+        ew = wsp*1 #blank for W, E for east (A1)
+        elev = wsp*4 #elevation in m (I4)
+        amppd = wsp*3 #period at which station amplitude measured (F3.1,2X)    
+        altcrust = wsp*1 #2 or A indicates using an alternate crustal model(A1)
+        stadelayrmk = wsp*1 #optional station delay remark (A1)
+        pdelay1 = wsp*5 #P delay (s) for set 1 (F5.2, 1X)
+        pdelay2= wsp*5 #P delay (s) for set 2 (F5.2, 1X)
+        ampmagadj = wsp*5 #amplitude magnitude correction (F5.2)
+        ampmagwt = wsp*1 #amplitude magnitude weight (A1)
+        durmagadj = wsp*5 #duration magnitude correction (F5.2)
+        durmagwt = wsp*1 #duration magnitude weight (A1)
+        itype = wsp*1 #instrument type code (I1)
+        icalib = wsp*6 #instrument calibration factor (F6.2)
+        sta2code = wsp*2 #2 letter station code (A2)
+        sta3altcode = wsp*3 #3 letter alternate component code (A3)
+        negdep = wsp*1 #make depth negative regardless of sign (A1)
+        
+        #set station line variables using data from tables
+        statcode = writeLength(statcode,"{:<5}".format(erow['sta']))
+        
+        statnet = writeLength(statnet,"{:<2}".format(erow['net']))
+        
+        if 'Z' in erow['chan']:
+            comp1code = writeLength(comp1code,'V')
+        else:
+            comp1code = writeLength(comp1code,'H')
+                
+        comp3code = writeLength(comp3code,"{:<3}".format(erow['chan'][:3]))
+    
+        latdeg = writeLength(latdeg,\
+        "{:>2}".format(int(np.floor(abs(erow['lat'])))))    
+        
+        if erow['lat'] < 0:
+            ns = writeLength(ns,'S')
+            
+        latmin = writeLength(latmin,"{:>7}".format(\
+        int(np.round(abs(erow['lat']%1)*60*10000))))
+        
+        longdeg = writeLength(longdeg,\
+        "{:>3}".format(int(np.floor(abs(erow['lon'])))))   
+        
+        if erow['lon'] > 0:
+            ew = writeLength(ew,'E')
+    
+        longmin = writeLength(longmin,"{:>7}".format(\
+        int(np.round(abs(erow['lon'])%1*60*10000))))
+        
+        elev = writeLength(elev,"{:>4}".format(int(erow['elev']*1000)))
+        
+        #instrument type code - does a text search to guess instrument type
+        #note that this does not distinguish between inst types 1 and 3, 1 Hz
+        #L4C velocity transducers where one type has attenuation history and  
+        #the other has CAL factor history; defaults to type 1
+        if str(erow['insname']).find('Wood-Anderson')>-1:
+            itype = writeLength(itype,0)
+        elif str(erow['insname']).find('L4C')>-1:
+            itype = writeLength(itype,1)
+        elif str(erow['insname']).find('Sprengnether')>-1:
+            itype = writeLength(itype,1)
+        elif str(erow['insname']).find('Nanometrics')>-1:
+            itype = writeLength(itype,4)
+        elif str(erow['insname']).find('Guralp')>-1:
+            itype = writeLength(itype,5)
+        elif str(erow['insname']).find('STS-1')>-1:
+            itype = writeLength(itype,6)
+        elif str(erow['insname']).find('STS-2')>-1:
+            itype = writeLength(itype,7)
+        
+        #calib factor -- based on ncalib value in table  
+        if np.isnan(erow['ncalib']) == False:        
+            icalib = writeLength(icalib,"{:>6}".format(\
+            int(round(erow['ncalib']*100))))
+        else:
+            icalib = writeLength(icalib,"{:>6}".format(0.0))
+        
+        #these variables default to 0, uncertain antelope table equivalent
+        amppd = writeLength(amppd,"0.0")    
+        pdelay1 = writeLength(pdelay1," 0.00")    
+        pdelay2 = writeLength(pdelay2," 0.00")
+        ampmagadj = writeLength(ampmagadj," 0.00")
+        durmagadj = writeLength(durmagadj," 0.00")
+        
+        #concat variables to a single line
+        staline = statcode+wsp+statnet+wsp+comp1code+comp3code+wsp+statweight+\
+        latdeg+wsp+latmin+ns+longdeg+wsp+longmin+ew+elev+amppd+wsp*2+altcrust+\
+        stadelayrmk+pdelay1+wsp+pdelay2+wsp+ampmagadj+ampmagwt+durmagadj+\
+        durmagwt+itype+icalib+sta2code+sta3altcode+negdep+'\n'
+    
+        #check that the line is not a duplicate already written to file
+        if staline not in newlines:            
+            newlines.append(staline)
+            
+            #write line to file and add to newlines
+            with open(ffname, openvar) as the_file:
+                if len(staline) != 87: #check pick line is the correct length 
+                    print(len(staline))
+                    print('error: terminator line is incorrect length, '+ \
+                    'not writing to file\n') 
+                else:
+                    the_file.write(staline)
+        
+        else:
+            print('station line duplicate not written to station file\n')
+            print('duplicate line '+staline+'\n')
+    
+        openvar='a' #add remaining station entries to file
     return stadb
 #######################MODIFY BELOW HERE#######################
     
@@ -477,10 +582,10 @@ def writeSta2Hypoinverse(dbid, ffname, append_stations=False):
 #Or change paths to files in function getData
 dbname = 'GADBPart1'
 
-#Example for writing station master file
-stadb = writeSta2Hypoinverse(dbname,dbname+'.sta',append_stations=False)
+#PART 1 for writing station master file
+#stadb = writeSta2Hypoinverse(dbname,dbname+'.sta',append_stations=False)
 
-#Example for fetching 1 event's data from tables and writing output to file
+#PART 2a for fetching 1 event's data from tables and writing output to file
 #Database event id - integer corresponding to event to prep for hypoinverse 
 #eventid = 69
 #Arc file name for writing hypoinverse-compatible output
@@ -490,4 +595,12 @@ stadb = writeSta2Hypoinverse(dbname,dbname+'.sta',append_stations=False)
 #Write data in hypoinverse format in file ffname
 #write2Hypoinverse(ev1dbm,arcfname)
 
-#Example for multiple event's data from tables and writing output to file
+#PART 2b for multiple event's data from tables and writing output to file
+evidlist = [69,99,2504,202,366,415,2507,435,653,1074,1104,1282,1331,
+            1510,1593,1594,1682,1798,1819,1901,1905,2028,2151,2241,
+            2263,2270,2272,2308,2336,2360,2362,2419,2420,2421,2436,
+            2437,2445,2457,2517,2468,2470,2473,2476,2478]
+arcfname = 'GADBPart1Events.arc'
+for seisevent in evidlist:
+    evdbm = getData(seisevent,dbname)
+    write2Hypoinverse(evdbm,arcfname)
