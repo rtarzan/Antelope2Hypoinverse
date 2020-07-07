@@ -26,7 +26,7 @@ import pandas as pd
 import time
 import numpy as np
 
-def getData(eventid, dbid):
+def getData(eventid, dbid, dbfoldername):
     print('Fetching data for event ' + str(eventid)+'\n')    
     
     #function merges key Antelope tables and extracts event information to 
@@ -37,11 +37,13 @@ def getData(eventid, dbid):
     eventdb = []
     
     #set paths to relevant tables
-    pathevtbl = dbid + '/' + dbid + '.event'
-    pathortbl = dbid + '/' + dbid + '.origin'
-    pathassoctbl = dbid + '/' + dbid + '.assoc'
-    patharrivtbl = dbid + '/' + dbid + '.arrival'
-    pathnetwktbl = dbid + '/' + dbid + '.snetsta'    
+    pathevtbl = dbfoldername + '/' + dbid + '.event'
+    pathortbl = dbfoldername + '/' + dbid + '.origin'
+    pathassoctbl = dbfoldername + '/' + dbid + '.assoc'
+    patharrivtbl = dbfoldername + '/' + dbid + '.arrival'
+    pathnetwktbl = dbfoldername + '/' + dbid + '.snetsta'    
+    #pathsitetbl = dbfoldername + '/' + dbid + '.site'
+    pathsitechantbl = dbfoldername + '/' + dbid + '.sitechan'
         
     #load antelope tables to dataframes and pull event related rows
     evtbl = pd.read_csv(pathevtbl,header=None,delim_whitespace=True,
@@ -66,8 +68,14 @@ def getData(eventid, dbid):
                                   'snr','qual','auth','commid','lddate'])
     netwktbl = pd.read_csv(pathnetwktbl,header=None,delim_whitespace=True,
                            names=['netwk','sta','staid','lddate'])
-                              
-    #TO DO - ADD STATION AND NETWORK MAGNITUDE TABLES
+    #sitetbl = pd.read_fwf(pathsitetbl,header=None,
+    #                      names=['sta','ondate','offdate','lat','lon','elev',
+    #                             'staname','statype','refsta','dnorth','deast',
+    #                             'lddate'])
+    sitechantbl = pd.read_csv(pathsitechantbl,header=None,
+                              delim_whitespace=True,names=['staid','chan',
+                              'ondate','chanid','offdate','ctype','edepth',
+                              'hang','vang','descrip','lddate'])
                            
     eventinfo = evtbl[evtbl.evid==eventid]  
     
@@ -79,7 +87,9 @@ def getData(eventid, dbid):
     eventdb = eventdb.merge(arrivtbl, 
                             on='arid', how='left',suffixes=['','_arriv'])
     eventdb = eventdb.merge(netwktbl, 
-                            on='sta', how='left',suffixes=['','_netsta']) 
+                            on='sta', how='left',suffixes=['','_netsta'])
+    eventdb = eventdb.merge(sitechantbl,
+                            on=['staid','chan'], how='left',suffixes=['','_site'])
      
     return eventdb
     
@@ -247,7 +257,10 @@ def write2Hypoinverse(eventdb, ffname):
     #PART 2: PICK LINES
     #loop through picks
     for iind, erow in eventdb.iterrows():
-        
+        #skip row if instrument not operational when event recorded
+        if (int(erow['jdate']) < int(erow['ondate'])) | (int(erow['jdate']) > int(erow['offdate'])):
+            continue
+
         #initialize pick data lines
         statcode = wsp*5 #left justified 5 letter station code (A5)
         statnet = wsp*2 #seismic network code (A2)
@@ -316,7 +329,7 @@ def write2Hypoinverse(eventdb, ffname):
             elif erow['fm'] == 'D':
                 pfm = writeLength(pfm,'D')
     
-            #LATER MAKE BETTER WEIGHTING SCHEME DOWNWEIGHT ARRIVALS FAR AWAY
+            #DEFAULTS ALL WEIGHTS TO 2...
             pweightcode = writeLength(pweightcode,2)
     
             psec = writeLength(psec,"{:>5}".format(int(time.gmtime\
@@ -333,15 +346,15 @@ def write2Hypoinverse(eventdb, ffname):
             round(erow['time_arriv']%1*100,0))))
     
         #placeholder 0s or no weights(4) where no measurements available
-        amp = writeLength(amp, "{:>7}".format(0))    
+        #amp = writeLength(amp, "{:>7}".format(0))    
     
-        ampunitcd = writeLength(ampunitcd, "{:>2}".format(0))
+        #ampunitcd = writeLength(ampunitcd, "{:>2}".format(0))
     
-        durmagwtcode = writeLength(durmagwtcode, 4)
+        #durmagwtcode = writeLength(durmagwtcode, 4)
     
-        codadur = writeLength(codadur, "{:>4}".format(0))    
+        #codadur = writeLength(codadur, "{:>4}".format(0))    
     
-        durmag = writeLength(durmag, "{:>3}".format(0))
+        #durmag = writeLength(durmag, "{:>3}".format(0))
         
         #concat to single line
         pline = statcode+statnet+wsp+comp1code+comp3code+wsp+prmk+pfm+\
@@ -403,10 +416,11 @@ def write2Hypoinverse(eventdb, ffname):
     
     return
     
-def writeSta2Hypoinverse(dbid, ffname, append_stations=False):
+def writeSta2Hypoinverse(dbid, dbfoldername, ffname, append_stations=False):
     #function uses Antelope tables to write a hypoinverse station file
-    #dbid is the name of the directory within working directory that holds
-    #the antelope tables, where the database is also called dbid
+    #dbid is the name of the database within working directory that holds
+    #the antelope tables
+    #dbfoldername is the name of the directory that holds the database
     #ffname is the name of the station file to write to
     #append stations is a T/F variable to indicate whether to append to file
     #ffname (True) or to over-write ffname (False)
@@ -415,12 +429,12 @@ def writeSta2Hypoinverse(dbid, ffname, append_stations=False):
     newlines = [] #initialize variable to test for duplicate station lines    
     
     #Paths to antelope tables with station data
-    pathnetwktbl = dbid + '/' + dbid + '.snetsta'
-    pathinsttbl = dbid + '/' + dbid + '.instrument'
-    pathsensortbl = dbid + '/' + dbid + '.sensor'
-    pathsitetbl = dbid + '/' + dbid + '.site'
-    pathsitechantbl = dbid + '/' + dbid + '.sitechan'
-    pathinsttbl = dbid + '/' + dbid + '.instrument'
+    pathnetwktbl = dbfoldername + '/' + dbid + '.snetsta'
+    pathinsttbl = dbfoldername + '/' + dbid + '.instrument'
+    pathsensortbl = dbfoldername + '/' + dbid + '.sensor'
+    pathsitetbl = dbfoldername + '/' + dbid + '.site'
+    pathsitechantbl = dbfoldername + '/' + dbid + '.sitechan'
+    pathinsttbl = dbfoldername + '/' + dbid + '.instrument'
     
     if append_stations==False:
         openvar = 'w'
@@ -580,14 +594,15 @@ def writeSta2Hypoinverse(dbid, ffname, append_stations=False):
     
 #Database name - put tables in folder in working directory that matches dbname
 #Or change paths to files in function getData
-dbname = 'GADBPart1'
+dbfoldername = 'GADBPart2_1_EQsAndBlasts'
+dbname = 'GADBPart2'
 
 #PART 1 for writing station master file
-#stadb = writeSta2Hypoinverse(dbname,dbname+'.sta',append_stations=False)
+stadb = writeSta2Hypoinverse(dbname,dbfoldername,dbname+'.sta',append_stations=False)
 
 #PART 2a for fetching 1 event's data from tables and writing output to file
 #Database event id - integer corresponding to event to prep for hypoinverse 
-#eventid = 69
+#eventid = 99
 #Arc file name for writing hypoinverse-compatible output
 #arcfname = str(eventid) + '.arc'
 #Get data for this event id
@@ -596,11 +611,16 @@ dbname = 'GADBPart1'
 #write2Hypoinverse(ev1dbm,arcfname)
 
 #PART 2b for multiple event's data from tables and writing output to file
-evidlist = [69,99,2504,202,366,415,2507,435,653,1074,1104,1282,1331,
-            1510,1593,1594,1682,1798,1819,1901,1905,2028,2151,2241,
-            2263,2270,2272,2308,2336,2360,2362,2419,2420,2421,2436,
-            2437,2445,2457,2517,2468,2470,2473,2476,2478]
-arcfname = 'GADBPart1Events.arc'
+#evidlist = [69,99,2504,202,246,296,366,415,2507,435,577,653,1074,1104,1241,1282,1331,
+#            1383,1474,1510,1593,1594,1682,1798,1901,1905,1952,2028,2151,2241,
+#            2263,2308,2336,2360,2362,2406,2419,2420,2421,2436,
+#            2437,2445,2457,2517,2468,2470,2473,2476,2478]
+
+#Work-around for getting through every event in a database
+maxevid = 5000 #maximum event id value in database
+evidlist = list(range(maxevid))
+
+arcfname = 'GADBPart2_1_EQsAndBlasts.arc'
 for seisevent in evidlist:
-    evdbm = getData(seisevent,dbname)
+    evdbm = getData(seisevent,dbname,dbfoldername)
     write2Hypoinverse(evdbm,arcfname)
